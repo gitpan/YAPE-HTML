@@ -1,8 +1,7 @@
-extra/YAPE.README
+extra/YAPE.pm
 Changes
 HTML.pm
 HTML/Element.pm
-HTML/README
 MANIFEST
 Makefile.PL
 README

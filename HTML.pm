@@ -5,7 +5,7 @@ use Carp;
 use strict;
 use vars qw( $VERSION %OPEN %EMPTY );
 
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 
 # when tags get added here, update the POD

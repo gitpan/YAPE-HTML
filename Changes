@@ -1,4 +1,6 @@
 Revision history for Perl extension YAPE::HTML.
 
+1.01  Wed Jan 30 16:14:00 2001
+	- fixed directory structure
 1.00  Tue Jan 30 15:06:17 2001
 	- the first released version
