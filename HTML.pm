@@ -3,27 +3,63 @@ package YAPE::HTML;
 use YAPE::HTML::Element;
 use Carp;
 use strict;
-use vars qw( $VERSION %OPEN %EMPTY );
+use vars qw( $VERSION %OPEN %EMPTY %SSI );
 
-$VERSION = '1.01';
+$VERSION = '1.10';
 
 
 # when tags get added here, update the POD
 my @empty = qw( area base br hr img input link meta param );
+my @open = qw( dd dt li p );
 
-@OPEN{@empty, qw( dd dt li p )} = ();
+
+@OPEN{@empty, @open} = ();
 sub OPEN { @OPEN{map lc, @_} = () }
+
 
 @EMPTY{@empty} = ();
 sub EMPTY { @OPEN{map lc, @_} = @EMPTY{map lc, @_} = () }
 
 
+# "CGI Programming with Perl", Ch. 6, "Server Side Includes" (O'Reilly)
+%SSI = (
+  config => { map +($_,1), qw( errmsg sizefmt timefmt ) },
+  echo => { map +($_,1), qw( var ) },
+  elif => { map +($_,1), qw( expr ) },
+  else => {},
+  endif => {},
+  exec => { map +($_,1), qw( cgi cmd ) },
+  flastmod => { map +($_,1), qw( file ) },
+  fsize => { map +($_,1), qw( file virtual ) },
+  if => { map +($_,1), qw( expr ) },
+  include => { map +($_,1), qw( file virtual ) },
+  printenv => {},
+  set => { map +($_,1), qw( var ) },
+);
+
+  
 my %pat = (
   # incomplete DTD support -- add to future version
-  DTD => qr{ <!DOCTYPE \s+ (\S+) \s+ (\S+) \s+ "([^"]*)" \s+ "([^"]*)" \s* > }x,
+  DTD => qr{ <!DOCTYPE (?= \s ) }x,
+  DTD_attr => qr{ \s+ ( "[^"]*" | '[^']*' | [^\s>]* ) }x,
+
+  # incomplete PI support -- add to future version
+  PI => qr{ <\? (\S+) }x,
+
+  SSI => qr{ <!--\# \s* ([a-z]*) }x,
+  SSI_attr => qr{
+    \s+ ([a-z]+)
+    (?: \s* = \s*
+      ( "[^"]*" | '[^']*' | (?: [^\s-]* (?: -+ (?! -- \s* > ) [^\s-]* )* ) )
+    )? }x,
 
   open_start => qr{ < ([a-zA-Z][a-zA-Z0-9.-]*) }x,
-  attr => qr{ \s+ ([\w-]+) (?: \s*=\s* ("[^"]*"|'[^']*'|[^\s>]*) )? }x,
+  attr => qr{
+    \s+ ([\w-]+)
+    (?: \s* = \s*
+      ( "[^"]*" | '[^']*' | [^\s>]* )
+    )?
+  }x,
   open_end => qr{ \s* (/?) > }x,
 
   close => qr{ < / \s* ([a-zA-Z][a-zA-Z0-9.-]*) \s* > }x,
@@ -55,13 +91,20 @@ my %pat = (
 
 sub import {
   shift;
-  my @obj = qw( tag closetag text comment );
+  my @obj = qw( tag closetag text comment dtd pi ssi );
   no strict 'refs';
   for my $class ('YAPE::HTML', @_) {
     (my $file = $class . ".pm") =~ s!::!/!g;
     require $file and $class->import if not $INC{$file};
     if ($class ne 'YAPE::HTML') {
-      push @{"${class}::${_}::ISA"}, "${class}::Element" for @obj;
+      %{"${class}::OPEN"} = %OPEN;
+      *{"${class}::OPEN"} = \&OPEN;
+      %{"${class}::EMPTY"} = %EMPTY;
+      *{"${class}::EMPTY"} = \&EMPTY;
+      %{"${class}::SSI"} = %SSI;
+      
+      push @{"${class}::ISA"}, 'YAPE::HTML';
+      push @{"${class}::${_}::ISA"}, "YAPE::HTML::$_" for @obj;
     }
     push @{"${class}::${_}::ISA"}, 'YAPE::HTML::Element' for @obj;
   }
@@ -140,12 +183,12 @@ sub next {
       $self->{STATE} = "close(script)";
       pop @{ $self->{TAG_STACK} };
       pop @{ $self->{CURRENT} };
-      return YAPE::HTML::closetag->new($1);
+      return (ref($self) . '::closetag')->new($1);
     }
     if ($self->{CONTENT} =~ s/^$pat{in_script}//) {
       push @{ $self->{CURRENT} }, $1;
       $self->{STATE} = "text(select)";
-      return YAPE::HTML::text->new($1);
+      return (ref($self) . '::text')->new($1);
     }
     $self->{STATE} = 'error';
     $self->{ERROR} = "in <SCRIPT>, didn't find </SCRIPT>";
@@ -159,12 +202,12 @@ sub next {
       $self->{STATE} = "close(xmp)";
       pop @{ $self->{TAG_STACK} };
       pop @{ $self->{CURRENT} };
-      return YAPE::HTML::closetag->new($1);
+      return (ref($self) . '::closetag')->new($1);
     }
     if ($self->{CONTENT} =~ s/^$pat{in_xmp}//) {
       push @{ $self->{CURRENT} }, $1;
       $self->{STATE} = "text(xmp)";
-      return YAPE::HTML::text->new($1);
+      return (ref($self) . '::text')->new($1);
     }
     $self->{STATE} = 'error';
     $self->{ERROR} = "in <XMP>, didn't find </XMP>";
@@ -172,13 +215,85 @@ sub next {
   }
 
   if ($self->{CONTENT} =~ s/^$pat{DTD}//) {
-    # XXX for future version
-    return $self->next;
+    my $DTD = (ref($self) . '::dtd')->new;
+
+    while ($self->{CONTENT} =~ s/^$pat{DTD_attr}//) {
+      push @{ $DTD->{ATTR} }, $1;
+    }
+    
+    if ($self->{CONTENT} =~ s/^(\s*>)//) {
+      push @{ $self->{CURRENT} }, $DTD;
+      $self->{STATE} = 'dtd';
+      return $DTD;
+    }
+    
+    $self->{ERROR} = 'malformed DTD';
+    $self->{STATE} = 'error';
+    return;
+  }
+
+  if ($self->{CONTENT} =~ s/^$pat{PI}//) {
+    my $PI = (ref($self) . '::pi')->new($1);
+
+    while ($self->{CONTENT} =~ s/^$pat{attr}//) {
+      my ($attr,$val) = ($1,$2);
+      defined($val) and $val =~ s/^["']// and chop $val;
+      $PI->{ATTR}{lc $attr} = $val;
+    }
+        
+    if ($self->{CONTENT} =~ s/^(\s*\?>)//) {
+      push @{ $self->{CURRENT} }, $PI;
+      $self->{STATE} = 'pi';
+      return $PI;
+    }
+    
+    $self->{ERROR} = 'malformed PI';
+    $self->{STATE} = 'error';
+    return;
+  }
+
+  if ($self->{CONTENT} =~ s/^$pat{SSI}//) {
+    my $com = $1;
+    
+    if (not length $com) {
+      $self->{ERROR} = 'malformed SSI';
+      $self->{STATE} = 'error';
+      return;
+    }
+
+    if (not $SSI{$com}) {
+      $self->{ERROR} = "unknown SSI command '$com'";
+      $self->{STATE} = 'error';
+      return;
+    }
+    
+    my $SSI = (ref($self) . '::ssi')->new($com);
+
+    while ($self->{CONTENT} =~ s/^$pat{SSI_attr}//) {
+      my ($attr,$val) = ($1,$2);
+      if (not $SSI{$com}{$1}) {
+        $self->{ERROR} = "unknown SSI attribute '$attr' for '$com'";
+        $self->{STATE} = 'error';
+        return;
+      }
+      defined($val) and $val =~ s/^["']// and chop $val;
+      $SSI->{ATTR}{$attr} = $val;
+    }
+    
+    if ($self->{CONTENT} =~ s/^\s*--\s*>//) {
+      push @{ $self->{CURRENT} }, $SSI;
+      $self->{STATE} = 'ssi';
+      return $SSI;
+    }
+    
+    $self->{ERROR} = 'malformed SSI';
+    $self->{STATE} = 'error';
+    return;
   }
 
   if ($self->{CONTENT} =~ s/^$pat{open_start}//) {
     my $element = lc $1;
-    my $tag = YAPE::HTML::tag->new($element, {}, []);
+    my $tag = (ref($self) . '::tag')->new($element, {}, []);
 
     $self->{STATE} = "open($element)";
     if (@{$self->{TAG_STACK}}) {
@@ -235,12 +350,12 @@ sub next {
 
     $self->{STATE} = "close($tag)";
     ($self->{CURRENT} = $node)->[-1]{CLOSED} = 1;
-    return YAPE::HTML::closetag->new($1);
+    return (ref($self) . '::closetag')->new($1);
   }
 
   if ($self->{CONTENT} =~ /^<!--/) {
     if ($self->{CONTENT} =~ s/^$pat{$self->{STRICT} ? 'strcomm' : 'comment'}//) {
-      my $comment = YAPE::HTML::comment->new($1);
+      my $comment = (ref($self) . '::comment')->new($1);
       push @{ $self->{CURRENT} }, $comment;
       $self->{STATE} = 'comment';
       return $comment;
@@ -251,7 +366,7 @@ sub next {
   }
 
   if ($self->{CONTENT} =~ s/^$pat{text}// and length $1) {
-    my $text = YAPE::HTML::text->new($1);
+    my $text = (ref($self) . '::text')->new($1);
     push @{ $self->{CURRENT} }, $text;
     $self->{STATE} = 'text';
     return $text;
@@ -268,13 +383,13 @@ sub extract {
   $self->parse;
 
   my $tree = $self->{TREE};
-  my (%opts,%tags,@rex,@nodes);
+  my (%req,@rex,@nodes);
 
-  $opts{lc $1} = shift while @_ and lc($_[0]) =~ /^-(text|comment|tag)/;
   while (@_) {
     my $key = shift;
+    $key = $1 if lc($key) =~ /^(-(?:text|comment|tag|dtd|pi|ssi))/;
     if (ref $key) { push @rex, [ $key, shift ] }
-    else { $tags{lc $key} = [ map lc, @{ shift() } ] }
+    else { $req{lc $key} = [ @{ shift() } ] }
   }
 
   @nodes = @{ $tree };
@@ -284,11 +399,17 @@ sub extract {
     while (!$match and @nodes) {
       my $n = shift @nodes;
       my $t = $n->type;
-      if ($t eq 'tag' and $opts{tag}) { $match = $n }
-      elsif ($t eq 'text' and $opts{text}) { $match = $n }
-      elsif ($t eq 'comment' and $opts{comment}) { $match = $n }
-      elsif ($t eq 'tag' and $tags{$n->{TAG}}) {
-        $match = $n if !grep !exists $n->{ATTR}{$_}, @{ $tags{$n->{TAG}} };
+      if ($req{-$t}) {
+        if ($t =~ /tag|dtd|pi|ssi/) {
+          $match = $n if !grep !exists $n->{ATTR}{lc $_}, @{ $req{$n->{TAG}} };
+        }
+        else {
+          $match = $n if !grep $n->{TEXT} !~ $_,
+            map ref($_) ? $_ : qr/\Q$_\E/, @{ $req{-$t} };
+        }
+      }
+      elsif ($t eq 'tag' and $req{$n->{TAG}}) {
+        $match = $n if !grep !exists $n->{ATTR}{$_}, @{ $req{$n->{TAG}} };
       }
       elsif (@rex and $t eq 'tag') {
         for (@rex) {
@@ -362,7 +483,7 @@ YAPE::HTML - Yet Another Parser/Extractor for HTML
   }
   
   # all comments
-  $extor = $parser->extract(-COMMENT);
+  $extor = $parser->extract(-COMMENT => []);
   while (my $chunk = $extor->()) {
     push @comments, $chunk;
   }
@@ -446,8 +567,27 @@ If supplied no arguments, the module is loaded normally, and the node classes
 are given the proper inheritence (from C<YAPE::HTML::Element>).  If you supply
 a module (or list of modules), C<import> will automatically include them (if
 needed) and set up I<their> node classes with the proper inheritence -- that is,
-it will append C<MyExt::Mod::Element> and C<YAPE::HTML::Element> to each node
-class's C<@ISA> (where C<MyExt::Mod> is the name of the module being used).
+it will append C<YAPE::HTML> to C<@MyExt::Mod::ISA>, and C<YAPE::HTML::xxx> to
+each node class's C<@ISA> (where C<xxx> is the name of the specific node class).
+
+It also copies the C<%OPEN> and C<%EMPTY> hashes, as well as the C<OPEN()> and
+C<EMPTY()> functions, into the C<MyExt::Mod> namespace.  This process is designed
+to save you from having to place C<@ISA> assignments all over the place.
+
+It also copies the C<%SSI> hash.  This hash is not suggested to be altered, and
+therefore it does not have any public interface (you have to fiddle with it
+yourself).  It exists to ensure an SSI is valid.
+
+  package MyExt::Mod;
+  use YAPE::HTML 'MyExt::Mod';
+  
+  # @MyExt::Mod::ISA = 'YAPE::HTML'
+  # @MyExt::Mod::text::ISA = 'YAPE::HTML::text'
+  # ...
+  
+  # being rather strict with the tags
+  %OPEN = ();
+  %EMPTY = ();
 
 =item * C<my $p = YAPE::HTML-E<gt>new($HTML, $strict);>
 
@@ -474,42 +614,8 @@ Returns the parser error message.
 =item * C<my $coderef = $p-E<gt>extract(...);>
 
 Returns a code reference that returns the next object that matches the criteria
-given in the arguments.  The arguments are various; all text:
-
-  $p->extract(-TEXT);
-
-all comments:
-
-  $p->extract(-COMMENT);
-
-all tags:
-
-  $p->extract(-TAG);
-
-specific tags:
-
-  $p->extract(b => [], i => [], u => []);
-
-specific tags with specific attributes:
-
-  $p->extract(a => ['href','target']);
-
-regex object to match tags:
-
-  $p->extract(qr/^h[1-6]$/ => []);
-
-regex object with specific attributes:
-
-  $p->extract(qr/^h[1-6]$/ => ['align']);
-
-or any combination of these -- the exception being that the three constants
-must appear before any of the tag-attribute pairs:
-
-  $p->extract(
-    -COMMENT,            # all comments
-    div => ['align'],    # <DIV> with ALIGN attr
-    qr/^t[drh]$/ => [],  # <TD> <TR> <TH> tags
-  );
+given in the arguments.  This is a fundamental feature of the module, and you can
+extract that from L<Extracting Sections>.
 
 =item * C<my $node = $p-E<gt>display(...);>
 
@@ -545,18 +651,75 @@ element.
 =item * C<my $state = $p-E<gt>state;>
 
 Returns the current state of the parser.  It is one of the following values:
-C<close(TAG)>, C<comment>, C<done>, C<error>, C<open(TAG)>, C<text>, 
-C<text(script)>, or C<text(xmp)>.  The C<open> and C<close> states contain the
-name of the element in parentheses (ex. C<open(img)>).  Tag names, as well as the
-names of attributes, are converted to lowercase.  The state of C<text(script)>
-refers to text found inside an C<E<lt>SCRIPTE<gt>> element, and likewise for
-C<text(xmp)>.
+C<close(TAG)>, C<comment>, C<done>, C<dtd>, C<error>, C<open(TAG)>, C<pi>,
+C<ssi>, C<text>, C<text(script)>, or C<text(xmp)>.  The C<open> and C<close>
+states contain the name of the element in parentheses (ex. C<open(img)>).  Tag
+names, as well as the names of attributes, are converted to lowercase.  The state
+of C<text(script)> refers to text found inside an C<E<lt>SCRIPTE<gt>> element,
+and likewise for C<text(xmp)>.
 
 =item * C<my $HTMLnode = $p-E<gt>top;>
 
 Returns the first C<E<lt>HTMLE<gt>> node it finds in the tree structure.
 
 =back
+
+=head2 Extracting Sections
+
+C<YAPE::HTML> allows comprehensive extraction of tags, text, comments, DTDs, PIs,
+and SSIs, using a simple, yet rich, syntax:
+
+  my $extor = $parser->extract(
+    TYPE => [ REQS ],
+    ...
+  );
+
+I<TYPE> can be either the name of a tag (C<"table">), a regular expression that
+matches tags (C<qr/^t[drh]$/>), or a special string to match all tags (C<-TAG>),
+all text (C<-TEXT>), all comments (C<-COMMENT>), all DTDs (C<-DTD>), all PIs
+(C<-PI>), and all SSIs (C<-SSI>).
+
+I<REQS> varies from element to element:
+
+=over 4
+
+=item * C<-TAG>, C<-DTD>, C<-PI>, C<-SSI>
+
+A list of attributes that the tag/DTD/PZ<>I/SSI must have.
+
+=item * C<-TEXT>, C<-COMMENT>
+
+A list of strings and regexes that the content of the text/comment must have or
+match.
+
+=back
+
+Here are some example uses:
+
+=over 4
+
+=item * all tags starting with "h"
+
+  my $extor = $parser->extract(qr/^h/ => []);
+
+=item * all tags with an "align" attribute
+
+  my $extor = $parser->extract(-TAG => ['align']);
+
+=item * all text containing the word "japhy"
+
+  my $extor = $parser->extract(-TEXT => [qr/\bjaphy\b/i]);
+
+=item * tags involving links
+
+  my $extor = $parser->extract(
+    a => ['href'],
+    area => ['href'],
+    base => ['href'],
+    body => ['background'],
+    img => ['src'],
+    # ...
+  );
 
 =head1 FEATURES
 
@@ -603,18 +766,10 @@ This is a listing of things to add to future versions of this module.
 
 =over 4
 
-=item * Proper DTD support
-
-Add an object, C<YAPE::HTML::dtd>, for handling a C<E<lt>!DOCTYPEE<gt>> tag.
-
 =item * HTML entity translation (via C<HTML::Entities> no doubt)
 
 Add a flag to the C<fullstring> method of objects, C<-EXPAND>, which will display
 C<&...;> HTML escapes as the character representing them.
-
-=item * SSI parsing support
-
-Add an object, C<YAPE::HTML::ssi>, for handling C<E<lt>!--#command E<gt>> tags.
 
 =item * Toggle case of output (lower/upper case)
 
@@ -647,6 +802,16 @@ Make three constants, C<CLOSED_NO>, C<CLOSED_YES>, and C<CLOSED_IMPL>.
 
 Following is a list of known or reported bugs.
 
+=head2 Fixed
+
+=over 4
+
+=item * Inheritence was fouled up (fixed in C<1.10>)
+
+=back
+
+=head2 Pending
+
 =over 4
 
 =item * The above features aren't in here yet.  C<;)>
@@ -655,7 +820,11 @@ Following is a list of known or reported bugs.
 
 =item * This documentation might be incomplete.
 
+=item * DTD, PZ<>I, and SSI support is incomplete.
+
 =item * Probably need some more test cases.
+
+=item * SSI conditional tags don't contain content.
 
 =back
 
@@ -675,3 +844,6 @@ The C<YAPE::HTML::Element> documentation, for information on the node classes.
   http://www.pobox.com/~japhy/
 
 =cut
+
+
+__END__

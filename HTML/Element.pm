@@ -1,6 +1,6 @@
 package YAPE::HTML::Element;
 
-$VERSION = '1.00';
+$VERSION = '1.10';
 
 
 sub text { $_[0]{TEXT} }
@@ -26,7 +26,7 @@ sub new {
 sub string {
   my $self = shift;
   my $str = "<$self->{TAG}";
-  for (keys %{ $self->{ATTR} }) {
+  for (sort keys %{ $self->{ATTR} }) {
     $str .= " $_";
     if (defined $self->{ATTR}{$_}) {
       $str .= "=" . YAPE::HTML::quote($self->{ATTR}{$_});
@@ -113,6 +113,118 @@ sub new {
 sub string { "<!--$_[0]{TEXT}-->" }
 
 
+
+package YAPE::HTML::dtd;
+
+sub new {
+  my ($class, $attr) = @_;
+  my $hattr;
+
+  $attr ||= [];
+  @{$hattr}{@$attr} = ();
+  bless { TYPE => 'dtd', ATTR => $attr, HATTR => $hattr }, $class;
+}
+
+sub get_attr { @{ $_[0]{ATTR} } }
+sub set_attr { @{ $_[0]{HATTR} }{ @{ $_[0]{ATTR} } = @_[1..$#_] } = () }
+sub string { "<!DOCTYPE @{ $_[0]{ATTR} }>" }
+
+
+
+package YAPE::HTML::pi;
+
+sub new {
+  my ($class, $name, $attr) = @_;
+  bless { TYPE => 'pi', NAME => $name, ATTR => $attr || {} }, $class;
+}
+
+sub string {
+  my $self = shift;
+  my $str = "<?$self->{NAME}";
+  for (sort keys %{ $self->{ATTR} }) {
+    $str .= " $_";
+    if (defined $self->{ATTR}{$_}) {
+      $str .= "=" . YAPE::HTML::quote($self->{ATTR}{$_});
+    }
+  }
+  $str .= "?>";
+  return $str;
+}
+
+sub get_attr {
+  my $self = shift;
+  return %{ $self->{ATTR} } if not @_;
+  return $self->{ATTR}{$_[0]} if @_ == 1;
+  return @{ $self->{ATTR} }{map lc, @_};
+}
+
+sub has_attr {
+  my $self = shift;
+  return exists $self->{ATTR}{lc $_[0]} if @_ == 1;
+  return map exists $self->{ATTR}{lc $_}, @_;
+}
+
+sub set_attr {
+  my $self = shift;
+  while (my $k = shift) { $self->{ATTR}{lc $k} = shift }
+}
+
+sub rem_attr {
+  my $self = shift;
+  delete @{ $self->{ATTR} }{map lc, @_};
+}
+
+sub name { $_[0]{NAME} }
+
+
+
+package YAPE::HTML::ssi;
+
+sub new {
+  my ($class, $com, $attr) = @_;
+  bless { TYPE => 'ssi', COM => $com, ATTR => $attr || {} }, $class;
+}
+
+sub string {
+  my $self = shift;
+  my $str = "<!--#$self->{COM}";
+  for (sort keys %{ $self->{ATTR} }) {
+    $str .= " $_";
+    if (defined $self->{ATTR}{$_}) {
+      $str .= "=" . YAPE::HTML::quote($self->{ATTR}{$_});
+    }
+  }
+  $str .= "-->";
+  return $str;
+}
+
+sub get_attr {
+  my $self = shift;
+  return %{ $self->{ATTR} } if not @_;
+  return $self->{ATTR}{$_[0]} if @_ == 1;
+  return @{ $self->{ATTR} }{map lc, @_};
+}
+
+sub has_attr {
+  my $self = shift;
+  return exists $self->{ATTR}{lc $_[0]} if @_ == 1;
+  return map exists $self->{ATTR}{lc $_}, @_;
+}
+
+sub set_attr {
+  my $self = shift;
+  while (my $k = shift) { $self->{ATTR}{lc $k} = shift }
+}
+
+sub rem_attr {
+  my $self = shift;
+  delete @{ $self->{ATTR} }{map lc, @_};
+}
+
+sub command { $_[0]{COM} }
+
+
+
 1;
 
 __END__
@@ -123,8 +235,8 @@ YAPE::HTML::Element - sub-classes for YAPE::HTML elements
 
 =head1 SYNOPSIS
 
-  use YAPE::HTML 'MyModule';
-  # this sets up inheritence in MyModule::Element
+  use YAPE::HTML 'MyExt::Mod';
+  # this sets up inheritence in MyExt::Mod
   # see YAPE::HTML documentation
 
 =head1 C<YAPE> MODULES
@@ -152,7 +264,8 @@ This class contains fallback methods for the other classes.
 
 Returns an array reference of objects between an open and close tag, or a string
 of plain text for a block of text or a comment.  This method merely returns the
-C<TEXT> value in the object hash.
+C<TEXT> value in the object hash.  This returns C<undef> for C<dtd>, C<pi>, and
+C<ssi> objects.
 
 =item * C<my $string = $obj-E<gt>string;>
 
@@ -354,11 +467,145 @@ C<--E<gt>> after it.
 
 =back
 
+=head2 Methods for C<YAPE::HTML::dtd>
+
+This class represents C<E<lt>!DOCTYPEE<gt>> tags.  Objects have the following
+methods:
+
+=over 4
+
+=item * C<my $dtd = YAPE::HTML::dtd-E<gt>new(\@fields);>
+
+Creates a C<YAPE::HTML::dtd> object.  Takes one argument: an array reference of
+the four fields (should be two unquoted strings, and two quoted strings (?)).
+
+  my $dtd = YAPE::HTML::dtd->new([
+    'HTML',
+    'PUBLIC',
+    '"-//W3C//DTD HTML 4.01//EN"',
+    '"http://www.w3.org/TR/html4/strict.dtd"'
+  ]);
+
+=item * C<my $str = $dtd-E<gt>string;>
+
+Creates a string representation of the DTD.
+
+  print $dtd->string;
+  # (line breaks added for readability)
+  # <!DOCTYPE HTML PUBLIC
+  #   "-//W3C//DTD HTML 4.01//EN"
+  #   "http://www.w3.org/TR/html4/strict.dtd">
+
+=item * C<my @attrs = $dtd-E<gt>get_attrs;>
+
+Returns the four attributes of the DTD.
+
+=item * C<$dtd-E<gt>set_attrs(@attrs);>
+
+Sets the four attributes of the DTD (can't be done piecemeal).
+
+=back
+
+=head2 Methods for C<YAPE::HTML::pi>
+
+This class represents process instruction tags.  Objects have the following
+methods:
+
+=over 4
+
+=item * S<C<my $pi = YAPE::HTML::pi-E<gt>new($name, $attr);>>
+
+Creates a C<YAPE::HTML::pi> object.  Takes two arguments: the name of the
+processing instruction, and a hash reference of attribute-value pairs.  The
+attribute hash reference must have the keys in lowercase text.
+
+  my $attr = { order => 'alphabetical', need => 'examples' };
+  my $pi = YAPE::HTML::pi->new(sample => $attr);
+
+=item * C<my $str = $pi-E<gt>string;>
+
+Creates a string representation of the processing instruction.
+
+  print $pi->string;
+  # <?sample need="examples" order="alphabetical"?>
+
+=item * C<my $attr = $pi-E<gt>get_attr($name);>
+
+=item * C<my @attrs = $pi-E<gt>get_attr(@names);>
+
+=item * C<my %attrs = $pi-E<gt>get_attr;>
+
+=item * C<my $attr = $pi-E<gt>has_attr($name);>
+
+=item * C<my @attrs = $pi-E<gt>has_attr(@names);>
+
+=item * C<$pi-E<gt>set_attr(%pairs);>
+
+=item * C<$pi-E<gt>rem_attr(@names);>
+
+See the identical methods for C<opentag> objects above.
+
+=item * C<my $name = $pi-E<gt>name;>
+
+Returns the name of the processing instruction.
+
+  print $pi->name;  # 'first'
+
+=back
+
+=head2 Methods for C<YAPE::HTML::ssi>
+
+This class represents server-side includes.  Objects have the following methods:
+
+=over 4
+
+=item * S<C<my $ssi = YAPE::HTML::ssi-E<gt>new($name, $attr);>>
+
+Creates a C<YAPE::HTML::ssi> object.  Takes two arguments: the SSI command, and
+a hash reference of attribute-value pairs.  The attribute hash reference must
+have the keys in lowercase text.
+
+  my $attr = { var => 'REMOTE_HOST' };
+  my $ssi = YAPE::HTML::ssi->new(echo => $attr);
+
+=item * C<my $str = $ssi-E<gt>string;>
+
+Creates a string representation of the processing instruction.
+
+  print $ssi->string;
+  # <!--#echo var="REMOTE_HOST"-->
+
+=item * C<my $attr = $ssi-E<gt>get_attr($name);>
+
+=item * C<my @attrs = $ssi-E<gt>get_attr(@names);>
+
+=item * C<my %attrs = $ssi-E<gt>get_attr;>
+
+=item * C<my $attr = $ssi-E<gt>has_attr($name);>
+
+=item * C<my @attrs = $ssi-E<gt>has_attr(@names);>
+
+=item * C<$ssi-E<gt>set_attr(%pairs);>
+
+=item * C<$ssi-E<gt>rem_attr(@names);>
+
+See the identical methods for C<opentag> objects above.
+
+=item * C<my $command = $ssi-E<gt>command;>
+
+Returns the SSI command's name.
+
+  print $ssi->command;  # 'echo'
+
+=back
+
 =head1 CAVEATS
 
 The C<E<lt>scriptE<gt>> and C<E<lt>xmpE<gt>> tags are given special treatment.
 When they are encountered, all text up to the first occurrence of the appropriate
 closing tag is taken as plain text.
+
+Tag attributes are displayed in the default C<sort()> order.
 
 =head1 TO DO
 
@@ -366,7 +613,10 @@ This is a listing of things to add to future versions of this module.
 
 =over 4
 
-=item * No items pending.
+=item * SSI commands C<if>, C<elif>, and C<else>
+
+These need to contain content, since the text between them is associated with a
+given condition.
 
 =back
 

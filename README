@@ -42,7 +42,7 @@ SYNOPSIS
       }
       
       # all comments
-      $extor = $parser->extract(-COMMENT);
+      $extor = $parser->extract(-COMMENT => []);
       while (my $chunk = $extor->()) {
         push @comments, $chunk;
       }
@@ -122,9 +122,31 @@ USAGE
         `YAPE::HTML::Element'). If you supply a module (or list of
         modules), `import' will automatically include them (if
         needed) and set up *their* node classes with the proper
-        inheritence -- that is, it will append `MyExt::Mod::Element'
-        and `YAPE::HTML::Element' to each node class's `@ISA' (where
-        `MyExt::Mod' is the name of the module being used).
+        inheritence -- that is, it will append `YAPE::HTML' to
+        `@MyExt::Mod::ISA', and `YAPE::HTML::xxx' to each node
+        class's `@ISA' (where `xxx' is the name of the specific node
+        class).
+
+        It also copies the `%OPEN' and `%EMPTY' hashes, as well as
+        the `OPEN()' and `EMPTY()' functions, into the `MyExt::Mod'
+        namespace. This process is designed to save you from having
+        to place `@ISA' assignments all over the place.
+
+        It also copies the `%SSI' hash. This hash is not suggested
+        to be altered, and therefore it does not have any public
+        interface (you have to fiddle with it yourself). It exists
+        to ensure an SSI is valid.
+
+          package MyExt::Mod;
+          use YAPE::HTML 'MyExt::Mod';
+          
+          # @MyExt::Mod::ISA = 'YAPE::HTML'
+          # @MyExt::Mod::text::ISA = 'YAPE::HTML::text'
+          # ...
+          
+          # being rather strict with the tags
+          %OPEN = ();
+          %EMPTY = ();
 
     * `my $p = YAPE::HTML->new($HTML, $strict);'
         Creates a `YAPE::HTML' object, using the contents of the
@@ -150,44 +172,9 @@ USAGE
 
     * `my $coderef = $p->extract(...);'
         Returns a code reference that returns the next object that
-        matches the criteria given in the arguments. The arguments
-        are various; all text:
-
-          $p->extract(-TEXT);
-
-        all comments:
-
-          $p->extract(-COMMENT);
-
-        all tags:
-
-          $p->extract(-TAG);
-
-        specific tags:
-
-          $p->extract(b => [], i => [], u => []);
-
-        specific tags with specific attributes:
-
-          $p->extract(a => ['href','target']);
-
-        regex object to match tags:
-
-          $p->extract(qr/^h[1-6]$/ => []);
-
-        regex object with specific attributes:
-
-          $p->extract(qr/^h[1-6]$/ => ['align']);
-
-        or any combination of these -- the exception being that the
-        three constants must appear before any of the tag-attribute
-        pairs:
-
-          $p->extract(
-            -COMMENT,            # all comments
-            div => ['align'],    # <DIV> with ALIGN attr
-            qr/^t[drh]$/ => [],  # <TD> <TR> <TH> tags
-          );
+        matches the criteria given in the arguments. This is a
+        fundamental feature of the module, and you can extract that
+        from the section on "Extracting Sections".
 
     * `my $node = $p->display(...);'
         Returns a string representation of the entire content. It
@@ -218,106 +205,154 @@ USAGE
 
     * `my $state = $p->state;'
         Returns the current state of the parser. It is one of the
-        following values: `close(TAG)', `comment', `done', `error',
-        `open(TAG)', `text', `text(script)', or `text(xmp)'. The
-        `open' and `close' states contain the name of the element in
-        parentheses (ex. `open(img)'). Tag names, as well as the
-        names of attributes, are converted to lowercase. The state
-        of `text(script)' refers to text found inside an `<SCRIPT>'
-        element, and likewise for `text(xmp)'.
+        following values: `close(TAG)', `comment', `done', `dtd',
+        `error', `open(TAG)', `pi', `ssi', `text', `text(script)',
+        or `text(xmp)'. The `open' and `close' states contain the
+        name of the element in parentheses (ex. `open(img)'). Tag
+        names, as well as the names of attributes, are converted to
+        lowercase. The state of `text(script)' refers to text found
+        inside an `<SCRIPT>' element, and likewise for `text(xmp)'.
 
     * `my $HTMLnode = $p->top;'
         Returns the first `<HTML>' node it finds in the tree
         structure.
 
+  Extracting Sections
+
+    `YAPE::HTML' allows comprehensive extraction of tags, text,
+    comments, DTDs, PIs, and SSIs, using a simple, yet rich, syntax:
+
+      my $extor = $parser->extract(
+        TYPE => [ REQS ],
+        ...
+      );
+
+    *TYPE* can be either the name of a tag (`"table"'), a regular
+    expression that matches tags (`qr/^t[drh]$/'), or a special
+    string to match all tags (`-TAG'), all text (`-TEXT'), all
+    comments (`-COMMENT'), all DTDs (`-DTD'), all PIs (`-PI'), and
+    all SSIs (`-SSI').
+
+    *REQS* varies from element to element:
+
+    * `-TAG', `-DTD', `-PI', `-SSI'
+        A list of attributes that the tag/DTD/PI/SSI must have.
+
+    * `-TEXT', `-COMMENT'
+        A list of strings and regexes that the content of the
+        text/comment must have or match.
+
+    Here are some example uses:
+
+    * all tags starting with "h"
+          my $extor = $parser->extract(qr/^h/ => []);
+
+    * all tags with an "align" attribute
+          my $extor = $parser->extract(-TAG => ['align']);
+
+    * all text containing the word "japhy"
+          my $extor = $parser->extract(-TEXT => [qr/\bjaphy\b/i]);
+
+    * tags involving links
+          my $extor = $parser->extract(
+            a => ['href'],
+            area => ['href'],
+            base => ['href'],
+            body => ['background'],
+            img => ['src'],
+            # ...
+          );
+
 FEATURES
-    This is a list of special features of `YAPE::HTML'.
+        This is a list of special features of `YAPE::HTML'.
 
     * On-the-fly cleaning of HTML
-        If you aren't enforcing strict HTML syntax, then in the act
-        of parsing HTML, if a tag that *should* be closed is not
-        closed, it will be flagged for closing. That means that
-        input like:
+            If you aren't enforcing strict HTML syntax, then in the
+            act of parsing HTML, if a tag that *should* be closed is
+            not closed, it will be flagged for closing. That means
+            that input like:
 
-          <b>Foo<i>bar</b>
+              <b>Foo<i>bar</b>
 
-        will appear as:
+            will appear as:
 
-          <b>Foo<i>bar</i></b>
+              <b>Foo<i>bar</i></b>
 
-        upon request for output. In addition, tags that are left
-        dangling open at the end of an HTML document get closed.
-        That means:
+            upon request for output. In addition, tags that are left
+            dangling open at the end of an HTML document get closed.
+            That means:
 
-          <b>Foo<i>bar
+              <b>Foo<i>bar
 
-        will appear as:
+            will appear as:
 
-          <b>Foo<i>bar</i></b>
+              <b>Foo<i>bar</i></b>
 
     * Syntax-checking
-        If strict checking is off, the only error you'll receive
-        from mismatched HTML tags is a closing tag out-of-place.
+            If strict checking is off, the only error you'll receive
+            from mismatched HTML tags is a closing tag out-of-place.
 
-        On the other hand, if you do enforce strict HTML syntax,
-        you'll be informed of tags that do not get closed as well
-        (that should be closed).
+            On the other hand, if you do enforce strict HTML syntax,
+            you'll be informed of tags that do not get closed as
+            well (that should be closed).
 
 TO DO
-    This is a listing of things to add to future versions of this
-    module.
+        This is a listing of things to add to future versions of
+        this module.
 
   API
 
-    * Proper DTD support
-        Add an object, `YAPE::HTML::dtd', for handling a
-        `<!DOCTYPE>' tag.
-
     * HTML entity translation (via `HTML::Entities' no doubt)
-        Add a flag to the `fullstring' method of objects, `-EXPAND',
-        which will display `&...;' HTML escapes as the character
-        representing them.
-
-    * SSI parsing support
-        Add an object, `YAPE::HTML::ssi', for handling `<!--#command
-        >' tags.
+            Add a flag to the `fullstring' method of objects, `-
+            EXPAND', which will display `&...;' HTML escapes as the
+            character representing them.
 
     * Toggle case of output (lower/upper case)
-        Add a flag to the `fullstring' method of objects, `-UPPER',
-        which will display tag and attribute names in uppercase.
+            Add a flag to the `fullstring' method of objects, `-
+            UPPER', which will display tag and attribute names in
+            uppercase.
 
     * Super-strict syntax checking
-        DTD-like strictness in regards to nesting of elements --
-        `<LI>' is not allowed to be outside an `<OL>' or `<UL>'
-        element.
+            DTD-like strictness in regards to nesting of elements --
+            `<LI>' is not allowed to be outside an `<OL>' or `<UL>'
+            element.
 
   Internals
 
     * Make it faster, of course
-        There's probably some inherent slowness to this method, but
-        it works. And it supports the robust `extract' method.
+            There's probably some inherent slowness to this method,
+            but it works. And it supports the robust `extract'
+            method.
 
     * Combine `CLOSED' and `IMPLICIT'
-        Make three constants, `CLOSED_NO', `CLOSED_YES', and
-        `CLOSED_IMPL'.
+            Make three constants, `CLOSED_NO', `CLOSED_YES', and
+            `CLOSED_IMPL'.
 
 BUGS
-    Following is a list of known or reported bugs.
+        Following is a list of known or reported bugs.
+
+  Fixed
+
+    * Inheritence was fouled up (fixed in `1.10')
+  Pending
 
     * The above features aren't in here yet.  `;)'
     * Strict syntax-checking is not on by default.
     * This documentation might be incomplete.
+    * DTD, PI, and SSI support is incomplete.
     * Probably need some more test cases.
+    * SSI conditional tags don't contain content.
 SUPPORT
-    Visit `YAPE''s web site at http://www.pobox.com/~japhy/YAPE/.
+        Visit `YAPE''s web site at
+        http://www.pobox.com/~japhy/YAPE/.
 
 SEE ALSO
-    The `YAPE::HTML::Element' documentation, for information on the
-    node classes.
+        The `YAPE::HTML::Element' documentation, for information on
+        the node classes.
 
 AUTHOR
-      Jeff "japhy" Pinyan
-      CPAN ID: PINYAN
-      japhy@pobox.com
-      http://www.pobox.com/~japhy/
+          Jeff "japhy" Pinyan
+          CPAN ID: PINYAN
+          japhy@pobox.com
+          http://www.pobox.com/~japhy/
 

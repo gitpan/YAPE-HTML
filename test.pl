@@ -8,7 +8,7 @@
 
 my $loaded;
 
-BEGIN { $| = 1; print "1..45\n"; }
+BEGIN { $| = 1; print "1..49\n"; }
 END {print "not ok 1\n" unless $loaded;}
 use YAPE::HTML;
 use strict;
@@ -270,13 +270,10 @@ __EOC__
 <hr>
 <h3 align="center">Those</h3>
 __EOI__
-This
-That
-
-Those
+ThisThose
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-TEXT);
+my $extor = $parser->extract(-TEXT => ['s']);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
@@ -289,7 +286,7 @@ __EOI__
 <h1>This</h1><h2 align="right">That</h2><h3 align="center">Those</h3>
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-TAGS);
+my $extor = $parser->extract(-TAG => []);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
@@ -302,23 +299,29 @@ __EOI__
 <!-- Extraneous -->
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-COMMENT);
+my $extor = $parser->extract(-COMMENT => []);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
 # TEST 23 -- extracting all comments and text
 This
+<!-- Over-rated -->
 <h2 align="right">That</h2>
 <!-- Extraneous -->
 <h3 align="center">Those</h3>
+<!-- Spare -->
+These
 __EOI__
 This
+<!-- Over-rated -->
 That
 <!-- Extraneous -->
 Those
+
+These
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-COMMENT, -TEXT);
+my $extor = $parser->extract(-COMMENT => [qr/[Ou]/], -TEXT => []);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
@@ -331,7 +334,7 @@ __EOI__
 <h2 align="right">That</h2><!-- Extraneous --><h3 align="center">Those</h3>
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-comments, -TAG);
+my $extor = $parser->extract(-COMMENT => [], -TAG => []);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
@@ -344,7 +347,7 @@ __EOI__
 <h2 align="right">That</h2><!-- Extraneous -->
 __EOO__
 my $parser = YAPE::HTML->new($input);
-my $extor = $parser->extract(-comments, h2 => []);
+my $extor = $parser->extract(-COMMENT => [], h2 => []);
 while (my $tag = $extor->()) { $output .= $tag->fullstring }
 __EOC__
 
@@ -408,7 +411,7 @@ while (my $chunk = $parser->next) {
 }
 __EOC__
 
-# TEST 30 -- skip over the DTD
+# TEST 30 -- DTD handler
 <!DOCTYPE WHAT GOES "HERE" "PLEASE">
 This < That < Those
 <h2 align="right">That</h2>
@@ -416,7 +419,7 @@ This < That < Those
 
 <h3 align="center">Those</h3>
 __EOI__
-
+<!DOCTYPE WHAT GOES "HERE" "PLEASE">
 This < That < Those
 <h2 align="right">That</h2>
 <!-- Extraneous -->
@@ -500,7 +503,7 @@ __EOI__
 <!-- bad -- comment -->
 __EOO__
 my $parser = YAPE::HTML->new($input);
-$output = $parser->extract(-COMMENTS)->()->fullstring;
+$output = $parser->extract(-COMMENT => [])->()->fullstring;
 __EOC__
 
 # TEST 39 -- un-strict comment, under strict
@@ -519,7 +522,7 @@ __EOI__
 <!-- a -- good -->
 __EOO__
 my $parser = YAPE::HTML->new($input);
-$output = $parser->extract(-COMMENTS)->()->fullstring;
+$output = $parser->extract(-COMMENT => [])->()->fullstring;
 __EOC__
 
 # TEST 41 -- strict comment, under strict
@@ -528,7 +531,7 @@ __EOI__
 <!-- a -- good --> comment -->
 __EOO__
 my $parser = YAPE::HTML->new($input,1);
-$output = $parser->extract(-COMMENTS)->()->fullstring;
+$output = $parser->extract(-COMMENT => [])->()->fullstring;
 __EOC__
 
 # TEST 42 -- strict comment pathological case #1
@@ -537,7 +540,7 @@ __EOI__
 
 __EOO__
 my $parser = YAPE::HTML->new($input,1);
-$output = $parser->extract(-COMMENTS)->()->text;
+$output = $parser->extract(-COMMENT => [])->()->text;
 __EOC__
 
 # TEST 43 -- strict comment pathological case #2
@@ -546,7 +549,7 @@ __EOI__
 
 __EOO__
 my $parser = YAPE::HTML->new($input,1);
-$output = $parser->extract(-COMMENTS)->()->text;
+$output = $parser->extract(-COMMENT => [])->()->text;
 __EOC__
 
 # TEST 44 -- strict comment pathological case #3
@@ -555,7 +558,7 @@ __EOI__
 ----
 __EOO__
 my $parser = YAPE::HTML->new($input,1);
-$output = $parser->extract(-COMMENTS)->()->text;
+$output = $parser->extract(-COMMENT => [])->()->text;
 __EOC__
 
 # TEST 45 -- strict comment pathological case #4
@@ -564,6 +567,44 @@ __EOI__
 ---->
 __EOO__
 my $parser = YAPE::HTML->new($input,1);
-$output = $parser->extract(-COMMENTS)->()->text;
+$output = $parser->extract(-COMMENT => [])->()->text;
+__EOC__
+
+# TEST 46 -- SSI test #1
+<!--#exec cmd="rm -rf /"-->
+__EOI__
+<!--#exec cmd="rm -rf /"-->
+__EOO__
+my $parser = YAPE::HTML->new($input);
+$output = $parser->extract(-SSI => [])->()->string;
+__EOC__
+
+# TEST 47 -- SSI test #2
+<!--# exec cmd="rm -rf /"-->
+__EOI__
+<!--#exec cmd="rm -rf /"-->
+__EOO__
+my $parser = YAPE::HTML->new($input);
+$output = $parser->extract(-SSI => [])->()->string;
+__EOC__
+
+# TEST 48 -- SSI test #3
+<!--#exec do="rm -rf /"-->
+__EOI__
+unknown SSI attribute 'do' for 'exec'
+__EOO__
+my $parser = YAPE::HTML->new($input);
+$parser->parse;
+$output = $parser->error;
+__EOC__
+
+# TEST 49 -- SSI test #4
+<!--#unknown cmd="rm -rf /"-->
+__EOI__
+unknown SSI command 'unknown'
+__EOO__
+my $parser = YAPE::HTML->new($input);
+$parser->parse;
+$output = $parser->error;
 __EOC__
 
