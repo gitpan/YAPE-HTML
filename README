@@ -333,6 +333,7 @@ BUGS
 
   Fixed
 
+    * Inheritence fixed again (fixed in `1.11')
     * Inheritence was fouled up (fixed in `1.10')
   Pending
 

@@ -5,7 +5,7 @@ use Carp;
 use strict;
 use vars qw( $VERSION %OPEN %EMPTY %SSI );
 
-$VERSION = '1.10';
+$VERSION = '1.11';
 
 
 # when tags get added here, update the POD
@@ -53,7 +53,7 @@ my %pat = (
       ( "[^"]*" | '[^']*' | (?: [^\s-]* (?: -+ (?! -- \s* > ) [^\s-]* )* ) )
     )? }x,
 
-  open_start => qr{ < ([a-zA-Z][a-zA-Z0-9.-]*) }x,
+  open_start => qr{ < ([a-zA-Z][\w.-]*) }x,
   attr => qr{
     \s+ ([\w-]+)
     (?: \s* = \s*
@@ -62,7 +62,7 @@ my %pat = (
   }x,
   open_end => qr{ \s* (/?) > }x,
 
-  close => qr{ < / \s* ([a-zA-Z][a-zA-Z0-9.-]*) \s* > }x,
+  close => qr{ < / \s* ([a-zA-Z][\w.-]*) \s* > }x,
 
   strcomm => qr{
     <!--
@@ -104,7 +104,8 @@ sub import {
       %{"${class}::SSI"} = %SSI;
       
       push @{"${class}::ISA"}, 'YAPE::HTML';
-      push @{"${class}::${_}::ISA"}, "YAPE::HTML::$_" for @obj;
+      push @{"${class}::${_}::ISA"},
+        "YAPE::HTML::$_", "${class}::Element" for @obj;
     }
     push @{"${class}::${_}::ISA"}, 'YAPE::HTML::Element' for @obj;
   }
@@ -806,6 +807,8 @@ Following is a list of known or reported bugs.
 
 =over 4
 
+=item * Inheritence fixed again (fixed in C<1.11>)
+
 =item * Inheritence was fouled up (fixed in C<1.10>)
 
 =back
@@ -844,6 +847,3 @@ The C<YAPE::HTML::Element> documentation, for information on the node classes.
   http://www.pobox.com/~japhy/
 
 =cut
-
-
-__END__
