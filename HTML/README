@@ -1,0 +1,241 @@
+NAME
+    YAPE::HTML::Element - sub-classes for YAPE::HTML elements
+
+SYNOPSIS
+      use YAPE::HTML 'MyModule';
+      # this sets up inheritence in MyModule::Element
+      # see YAPE::HTML documentation
+
+`YAPE' MODULES
+    The `YAPE' hierarchy of modules is an attempt at a unified means
+    of parsing and extracting content. It attempts to maintain a
+    generic interface, to promote simplicity and reusability. The
+    API is powerful, yet simple. The modules do tokenization (which
+    can be intercepted) and build trees, so that extraction of
+    specific nodes is doable.
+
+DESCRIPTION
+    This module provides the classes for the `YAPE::HTML' objects.
+    The base class for these objects is `YAPE::HTML::Element'; the
+    four object classes are `YAPE::HTML::opentag',
+    `YAPE::HTML::closetag', `YAPE::HTML::text', and
+    `YAPE::HTML::comment'.
+
+  Methods for `YAPE::HTML::Element'
+
+    This class contains fallback methods for the other classes.
+
+    * `my $content = $obj->text;'
+        Returns an array reference of objects between an open and
+        close tag, or a string of plain text for a block of text or
+        a comment. This method merely returns the `TEXT' value in
+        the object hash.
+
+    * `my $string = $obj->string;'
+        Returns a string representing the single object (for tags,
+        this does not include the elements found in between the open
+        and close tag). This method merely calls the object's `text'
+        method.
+
+    * `my $complete = $obj->fullstring;'
+        Returns a string representing the object (and all objects
+        found within it, in the case of a tag). This method merely
+        calls the object's `string' method.
+
+    * `my $type = $obj->type;'
+        Returns the type of the object: `tag', `closetag', `text',
+        or `comment'.
+
+  Methods for `YAPE::HTML::opentag'
+
+    This class represents tags. Object has the following methods:
+
+    * `my $tag = YAPE::HTML::opentag->new($name, $attr, $text, $closed, $impl);'
+        Creates a `YAPE::HTML::opentag' object. Takes five
+        arguments: the name of the HTML element, a hash reference of
+        attribute-value pairs, an array reference of objects to be
+        included in between the open and closing tags, whether the
+        tag is explicitly closed or not, and whether the tag is
+        implicitly closed or not. The attribute hash reference must
+        have the keys in lowercase text.
+
+          my $attr = { src => 'foo.png', alt => 'foo' };
+          my $img = YAPE::HTML::opentag->new('img', $attr, [], 0, 1);
+          
+          my $text = [ YAPE::HTML::text->new("Bar!"), $img ];
+          my $name = YAPE::HTML::opentag->new('a', { name => 'foo' }, $text);
+
+    * `my $str = $tag->string;'
+        Creates a string representation of the *tag only*. This
+        means the tag, and any attributes of the tag *only*. No
+        closing tag (if any) is returned.
+
+          print $img->string;
+          # <img src="foo.png" alt="foo" />
+          
+          print $name->string;
+          # <a name="foo">
+
+    * `my $str = $tag->fullstring($exclude, $depth);'
+        Creates a string representation of the tag, the content
+        enclosed between the open and closing tags, and the closing
+        tag (if applicable). The method can take two arguments: an
+        array reference of tag names not to render, and the depth
+        with which to render tags. The `$exclude' defaults to none,
+        and `$depth' defaults to `-1', which means there is no depth
+        limit.
+
+          print $img->fullstring;
+          # <img src="foo.png" width=20 height=43 />
+          
+          print $name->fullstring;
+          # <a name="foo">Bar!<img src="foo.png" alt="foo" /></a>
+          
+          print $name->fullstring(0);
+          # Bar!
+          
+          print $name->fullstring(['img']);
+          # <a name="foo">Bar!</a>
+          
+          print $name->fullstring(1);
+          # <a name="foo">Bar!</a>
+
+    * `my $attr = $tag->get_attr($name);'
+    * `my @attrs = $tag->get_attr(@names);'
+    * `my %attrs = $tag->get_attr;'
+        Fetches any number of attribute values from a tag. Note:
+        tags which contain attributes with no value have a value of
+        `undef' returned for that attribute -- this is
+        indistinguishable from the `undef' returned for a tag that
+        does not have an attribute. This is on the list of things to
+        be fixed. In the meantime, use the `has_attr' method
+        beforehand.
+
+          print $name->get_attr('name');
+          # 'foo'
+          
+          my %list = $img->get_attr;
+          # alt => 'foo', src => 'foo.png'
+
+    * `my $attr = $tag->has_attr($name);'
+    * `my @attrs = $tag->has_attr(@names);'
+        Returns `1' or `""' depending on the existence of the
+        attribute in the tag.
+
+          my @on = $name->has_attr(qw( name href ));  # (1,0)
+
+    * `$tag->set_attr(%pairs);'
+        Sets a list of attributes to the associated values for the
+        tag.
+
+          $img->set_attr( width => 40, height => 16 );
+
+    * `$tag->rem_attr(@names);'
+        Removes (and returns) the specified attributes from a tag.
+        See the caveat above for the `get_attr' method about `undef'
+        values.
+
+          my $src = $img->rem_attr('src');
+
+    * `my $closed = $tag->closed;'
+        Returns `1' or `0', depending on whether or not the tag is
+        closed. This means it has a closing tag -- tags like `<hr
+        />' are not closed.
+
+    * `my $impl = $tag->implied_closed;'
+        Returns `1' or `0', depending on whether or not the tag is
+        implicitly closed with a `/' at the end of the tag (like
+        `<hr />').
+
+    * `my $tagname = $tag->tag;'
+        Returns the name of the HTML element.
+
+          print $name->tag;  # 'a'
+
+  Methods for `YAPE::HTML::closetag'
+
+    This class represents closing tags. Object has the following
+    methods:
+
+    * `my $tag = YAPE::HTML::closetag->new($name);'
+        Creates a `YAPE::HTML::closetag' object. Takes one argument:
+        the name of the HTML element. These objects are never
+        included in the HTML tree structure, since the parser uses
+        the `CLOSED' attribute of an `opentag' object to figure out
+        if there needs to be a closing tag. However, they are
+        returned in the parsing stage so that you know when they've
+        been reached.
+
+          my $close = YAPE::HTML::closetag->new('a');
+
+    * `my $str = $tag->string;'
+        Creates a string representation of the closing tag.
+
+          print $close->string;  # '</a>'
+
+    * `my $tagname = $tag->tag;'
+        Returns the name of the HTML element.
+
+          print $close->tag;  # 'a'
+
+  Methods for `YAPE::HTML::text'
+
+    This class represents blocks of plain text. Objects have the
+    following methods:
+
+    * `my $text = YAPE::HTML::text->new($content);'
+        Creates a `YAPE::HTML::text' object. Takes one argument: the
+        text of the block.
+
+          my $para = YAPE::HTML::text->new(<< "END");
+          Perl is not an acronym -- rather "Practical Extraction
+          and Report Language" was developed after the fact.
+          END
+
+  Methods for `YAPE::HTML::comment'
+
+    This class represents comments. Objects have the following
+    methods:
+
+    * `my $comment = YAPE::HTML::comment->new($content);'
+        Creates a `YAPE::HTML::comment' object. Takes one argument:
+        the text of the comment.
+
+          my $todo = YAPE::HTML::comment->new(<< "END");
+          This table should be formatted differently.
+          END
+
+    * `my $str = $comment->string;'
+        Creates a string representation of the comment, with `<!--'
+        before it, and `-->' after it.
+
+          print $todo->string;
+          # <!--This table should be formatted differently-->
+
+CAVEATS
+    The `<script>' and `<xmp>' tags are given special treatment.
+    When they are encountered, all text up to the first occurrence
+    of the appropriate closing tag is taken as plain text.
+
+TO DO
+    This is a listing of things to add to future versions of this
+    module.
+
+    * No items pending.
+BUGS
+    Following is a list of known or reported bugs.
+
+    * This documentation might be incomplete.
+SUPPORT
+    Visit `YAPE''s web site at http://www.pobox.com/~japhy/YAPE/.
+
+SEE ALSO
+    The `YAPE::HTML::Element' documentation, for information on the
+    node classes.
+
+AUTHOR
+      Jeff "japhy" Pinyan
+      CPAN ID: PINYAN
+      japhy@pobox.com
+      http://www.pobox.com/~japhy/
+
